@@ -152,6 +152,21 @@ function collectInventoryProviders(
 }
 
 /**
+ * A native reasoning tier is routable only on an account whose own catalog lists it: no
+ * fail-open, and a malformed per-account inventory admits no account at all.
+ */
+function applyStrictNativeReasoningInventory(
+  connections: ProviderConnectionView[],
+  acc: InventoryAccumulator
+): void {
+  for (const connection of connections) {
+    if (!isPerAccountCatalogProvider(connection.provider)) continue;
+    const listed = acc.perAccountMalformed ? undefined : acc.perAccountInventory.get(connection.id);
+    acc.advertised.set(connection.id, listed || new Set());
+  }
+}
+
+/**
  * Self-hosted hosts, Codex subscription accounts and Antigravity/agy accounts (plans list
  * different models) can advertise different inventories. For Codex, once an account inventory advertises the requested
  * model, unsynchronized accounts are not eligible guesses for it. With no
@@ -172,7 +187,8 @@ function collectInventoryProviders(
 export async function loadAdvertisedModelsForConnections(
   connections: ProviderConnectionView[],
   requestedModel: string | null,
-  poolConnections: ProviderConnectionView[] = connections
+  poolConnections: ProviderConnectionView[] = connections,
+  requireNativeReasoningCatalog = false
 ): Promise<Map<string, Set<string>>> {
   const advertised = new Map<string, Set<string>>();
   if (!requestedModel) return advertised;
@@ -199,6 +215,11 @@ export async function loadAdvertisedModelsForConnections(
       collectProviderInventory(providerId, connections, requestedModel, acc)
     )
   );
+
+  if (requireNativeReasoningCatalog) {
+    applyStrictNativeReasoningInventory(connections, acc);
+    return advertised;
+  }
 
   if (!acc.perAccountMalformed) {
     // When no account advertises the model the lists are stale/incomplete: fail open instead of
